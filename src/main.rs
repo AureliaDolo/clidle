@@ -1,7 +1,25 @@
-use std::{collections::HashMap, fs, time::{Instant, Duration}};
+use std::{
+    collections::HashMap,
+    fs,
+    time::{Duration, Instant},
+};
 
-use rustyline::DefaultEditor;
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use serde::{Deserialize, Serialize};
+use std::{error::Error, io};
+use tui::{
+    backend::{Backend, CrosstermBackend},
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Span, Spans, Text},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Frame, Terminal,
+};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Item {
@@ -12,111 +30,246 @@ struct Item {
     long_name: String,
 }
 
-#[derive(Debug, Default)]
-struct State {
-    // item type, count
+enum InputMode {
+    Buy,
+    Sell,
+    Normal,
+}
+
+/// App holds the state of the application
+struct App {
+    /// Current value of the input box
+    input: String,
+    /// Current input mode
+    input_mode: InputMode,
+
     owned_items: HashMap<u64, u64>,
     code_lines: f64,
     items_index: HashMap<u64, Item>,
 }
 
-impl State {
-    fn print(&self) {
-        println!("Code lines: {}", self.code_lines);
-        for (item_id, item_count) in self.owned_items.iter() {
-            let item_type = self.items_index.get(item_id).unwrap();
-            println!(
-                "Owning {item_count} {} producing a total of {} code line per second",
-                item_type.long_name,
-                *item_count as f64 * item_type.cps
-            )
+impl App {
+    fn new() -> App {
+        let items: Vec<Item> = serde_json::from_str(
+            &fs::read_to_string("items.json").expect("Should have been able to read the file"),
+        )
+        .unwrap();
+        App {
+            input: String::new(),
+            input_mode: InputMode::Normal,
+            owned_items: HashMap::new(),
+            code_lines: 0.,
+            items_index: items.into_iter().map(|i| (i.id, i)).collect(),
         }
     }
-
     fn update(&mut self) {
         for (item_id, item_count) in self.owned_items.iter() {
             let item_type = self.items_index.get(item_id).unwrap();
             self.code_lines += *item_count as f64 * item_type.cps;
         }
     }
-
-    fn action(
-        &mut self,
-        action: Action,
-        item: Option<&str>,
-        count: Option<u64>,
-    ) -> Result<(), String> {
-        match action {
-            Action::Code => {
-                self.code_lines += 1.;
-            }
-            Action::Buy => {
-                let item = item.unwrap();
-                let (item_id, item_type) = self
-                    .items_index
-                    .iter()
-                    .find(|(_, i)| i.name == item)
-                    .unwrap();
-                let count = count.unwrap_or(1);
-                if item_type.cost * count < self.code_lines.floor() as u64 {
-                    self.code_lines -= (item_type.cost * count) as f64;
-                    self.owned_items.entry(*item_id).and_modify(|e| *e+=count).or_insert(count);
-                }
-            }
-            Action::Sell => todo!(),
-            Action::Help => todo!(),
-        }
-        Ok(())
-    }
 }
 
-enum Action {
-    Code,
-    Buy,
-    Sell,
-    Help,
-}
+fn main() -> Result<(), Box<dyn Error>> {
+    // setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-impl TryFrom<&str> for Action {
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "code" => Ok(Action::Code),
-            "sell" => Ok(Action::Sell),
-            "buy" => Ok(Action::Buy),
-            "help" => Ok(Action::Help),
-            _ => Err("unknown action".to_string()),
-        }
+    // create app and run it
+    let app = App::new();
+    let res = run_app(&mut terminal, app);
+
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    if let Err(err) = res {
+        println!("{:?}", err)
     }
 
-    type Error = String;
-}
-
-fn main() -> rustyline::Result<()> {
-    // `()` can be used when no completer is required
-    let mut rl = DefaultEditor::new()?;
-    let mut state = State::default();
-    let items: Vec<Item> = serde_json::from_str(
-        &fs::read_to_string("items.json").expect("Should have been able to read the file"),
-    )
-    .unwrap();
-    state.items_index = items.into_iter().map(|i| (i.id, i)).collect();
-    let mut last_tick =      Instant::now();
-    loop {
-        if last_tick.elapsed() >= Duration::from_secs(1){
-            state.update();
-            last_tick = Instant::now();
-            continue;
-        }
-        let line = rl.readline("> ")?;
-        println!("{line}");
-        let mut line = line.split_ascii_whitespace();
-        if let Some(action) = line.next() {
-            let action = Action::try_from(action).unwrap();
-            let item = line.next();
-            let count = line.next().map(|s| s.parse::<u64>().unwrap());
-            state.action(action, item, count).unwrap();
-        }
-        state.print()
-    }
     Ok(())
+}
+
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+    let mut last_tick = Instant::now();
+
+    loop {
+        if last_tick.elapsed() >= Duration::from_secs(1) {
+            app.update();
+            last_tick = Instant::now();
+        }
+        terminal.draw(|f| ui(f, &app))?;
+
+        if let Event::Key(key) = event::read()? {
+            match app.input_mode {
+                InputMode::Normal => match key.code {
+                    KeyCode::Char('b') => {
+                        app.input_mode = InputMode::Buy;
+                    }
+                    KeyCode::Char('c') => {
+                        app.code_lines += 1.;
+                    }
+                    KeyCode::Char('s') => {
+                        app.input_mode = InputMode::Sell;
+                    }
+                    KeyCode::Char('q') => {
+                        return Ok(());
+                    }
+                    _ => {}
+                },
+                InputMode::Buy => match key.code {
+                    KeyCode::Char(c) => {
+                        app.input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        app.input.pop();
+                    }
+                    KeyCode::Enter => {
+                        let (item_id, item_type) = app
+                            .items_index
+                            .iter()
+                            .find(|(_, i)| i.name == app.input)
+                            .unwrap();
+                        let count = 1; // TODO buy multiple
+                        if item_type.cost * count < app.code_lines.floor() as u64 {
+                            app.code_lines -= (item_type.cost * count) as f64;
+                            app.owned_items
+                                .entry(*item_id)
+                                .and_modify(|e| *e += count)
+                                .or_insert(count);
+                        }
+                    }
+                    KeyCode::Esc => {
+                        app.input_mode = InputMode::Normal;
+                    }
+                    _ => {}
+                },
+                InputMode::Sell => todo!(),
+            }
+        }
+    }
+}
+
+fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints(
+            [
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ]
+            .as_ref(),
+        )
+        .split(f.size());
+
+    let (msg, style) = match app.input_mode {
+        InputMode::Normal => (
+            vec![
+                Span::raw(format!("Owning {:.2} code lines, ", app.code_lines)),
+                Span::raw("Press "),
+                Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to exit, "),
+                Span::styled("c", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to code, "),
+                Span::styled("b", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to start buying, "),
+                Span::styled("s", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to start selling."),
+            ],
+            Style::default().add_modifier(Modifier::RAPID_BLINK),
+        ),
+        InputMode::Buy => (
+            vec![
+                Span::raw(format!("Owning {:.2} code lines, ", app.code_lines)),
+                Span::raw("Press "),
+                Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to stop buying, "),
+                Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to record the message"),
+            ],
+            Style::default(),
+        ),
+        InputMode::Sell => (
+            vec![
+                Span::raw(format!("Owning {:.2} code lines, ", app.code_lines)),
+                Span::raw("Press "),
+                Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to stop selling, "),
+                Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" to record the message"),
+            ],
+            Style::default(),
+        ),
+    };
+    let mut text = Text::from(Spans::from(msg));
+    text.patch_style(style);
+    let help_message = Paragraph::new(text);
+    f.render_widget(help_message, chunks[0]);
+
+    let input = Paragraph::new(app.input.as_ref())
+        .style(match app.input_mode {
+            InputMode::Normal => Style::default(),
+            InputMode::Buy => Style::default().fg(Color::Green),
+            InputMode::Sell => Style::default().fg(Color::Red),
+        })
+        .block(Block::default().borders(Borders::ALL).title("Input"));
+    f.render_widget(input, chunks[1]);
+    match app.input_mode {
+        InputMode::Normal =>
+            // Hide the cursor. `Frame` does this by default, so we don't need to do anything here
+            {}
+
+        InputMode::Sell | InputMode::Buy => {
+            // Make the cursor visible and ask tui-rs to put it at the specified coordinates after rendering
+            f.set_cursor(
+                // Put cursor past the end of the input text
+                chunks[1].x + app.input.width() as u16 + 1,
+                // Move one line down, from the border to the input line
+                chunks[1].y + 1,
+            )
+        }
+    }
+
+    let owned: Vec<ListItem> = app
+        .owned_items
+        .iter()
+        .map(|(item_id, item_count)| {
+            let item_type = app.items_index.get(item_id).unwrap();
+
+            let content = vec![Spans::from(Span::raw(format!(
+                "Owning {item_count} {} producing a total of {:.2} code line per second",
+                item_type.long_name,
+                *item_count as f64 * item_type.cps
+            )))];
+            ListItem::new(content)
+        })
+        .collect();
+    let owned = List::new(owned).block(Block::default().borders(Borders::ALL).title("Owned"));
+    f.render_widget(owned, chunks[2]);
+
+    let messages: Vec<ListItem> = app
+        .items_index
+        .values()
+        .map(|item| {
+            let content = vec![Spans::from(Span::raw(format!(
+                "Buy {}(as {}) producing {:.2} code lines per second",
+                item.long_name, item.name, item.cps
+            )))];
+            ListItem::new(content)
+        })
+        .collect();
+    let messages =
+        List::new(messages).block(Block::default().borders(Borders::ALL).title("Messages"));
+    f.render_widget(messages, chunks[3]);
 }
