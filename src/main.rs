@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::{self},
     fs,
     time::{Duration, Instant},
 };
@@ -42,10 +43,10 @@ struct App {
     input: String,
     /// Current input mode
     input_mode: InputMode,
-
     owned_items: HashMap<u64, u64>,
     code_lines: f64,
     items_index: HashMap<u64, Item>,
+    error: Option<ClideError>,
 }
 
 impl App {
@@ -60,6 +61,7 @@ impl App {
             owned_items: HashMap::new(),
             code_lines: 0.,
             items_index: items.into_iter().map(|i| (i.id, i)).collect(),
+            error: None,
         }
     }
     fn update(&mut self) {
@@ -98,7 +100,95 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+#[derive(Debug)]
+enum ClideError {
+    BuyingItemNotKnown(String),
+}
+
+impl Error for ClideError {}
+
+impl fmt::Display for ClideError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+/// States of the game.
+enum GameState {
+    /// Item you wanna buy need to be parsed.
+    BuyItem(String),
+    /// Nothing from input, at least it's fast to manage
+    Noop,
+    /// Stop gaming, go code for work government said.
+    Quit,
+}
+
+/// Check if you can buy an item and buy it.
+///
+/// ## Errors
+///
+/// May return the infamous `ClideError::BuyingItemNotKnown` if
+/// your item is not known.
+fn buy_item(app: &mut App, item: String) -> Result<(), ClideError> {
+    let (item_id, item_type) = app
+        .items_index
+        .iter()
+        .find(|(_, i)| i.name == item)
+        .ok_or_else(|| ClideError::BuyingItemNotKnown(item.clone()))?;
+
+    let count = 1; // TODO buy multiple
+    if item_type.cost * count < app.code_lines.floor() as u64 {
+        app.code_lines -= (item_type.cost * count) as f64;
+        app.owned_items
+            .entry(*item_id)
+            .and_modify(|e| *e += count)
+            .or_insert(count);
+    }
+    Ok(())
+}
+
+/// Handles inputs if it's successful you get a GameState if not you may end up with
+/// an IO error.
+fn handle_input(mut app: &mut App) -> io::Result<GameState> {
+    if let Event::Key(key) = event::read()? {
+        match app.input_mode {
+            InputMode::Normal => match key.code {
+                KeyCode::Char('b') => {
+                    app.input_mode = InputMode::Buy;
+                }
+                KeyCode::Char('c') => {
+                    app.code_lines += 1.;
+                }
+                KeyCode::Char('s') => {
+                    app.input_mode = InputMode::Sell;
+                }
+                KeyCode::Char('q') => {
+                    return Ok(GameState::Quit);
+                }
+                _ => {}
+            },
+            InputMode::Buy => match key.code {
+                KeyCode::Char(c) => {
+                    app.input.push(c);
+                }
+                KeyCode::Backspace => {
+                    app.input.pop();
+                }
+                KeyCode::Enter => {
+                    return Ok(GameState::BuyItem(app.input.drain(..).collect()));
+                }
+                KeyCode::Esc => {
+                    app.input_mode = InputMode::Normal;
+                }
+                _ => {}
+            },
+            InputMode::Sell => todo!(),
+        }
+    }
+    Ok(GameState::Noop)
+}
+
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<(), Box<dyn Error>> {
     let mut last_tick = Instant::now();
 
     loop {
@@ -106,59 +196,22 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
             app.update();
             last_tick = Instant::now();
         }
-        terminal.draw(|f| ui(f, &app))?;
+        terminal.draw(|f| ui(f, &mut app))?;
 
-        if let Event::Key(key) = event::read()? {
-            match app.input_mode {
-                InputMode::Normal => match key.code {
-                    KeyCode::Char('b') => {
-                        app.input_mode = InputMode::Buy;
-                    }
-                    KeyCode::Char('c') => {
-                        app.code_lines += 1.;
-                    }
-                    KeyCode::Char('s') => {
-                        app.input_mode = InputMode::Sell;
-                    }
-                    KeyCode::Char('q') => {
-                        return Ok(());
-                    }
-                    _ => {}
-                },
-                InputMode::Buy => match key.code {
-                    KeyCode::Char(c) => {
-                        app.input.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        app.input.pop();
-                    }
-                    KeyCode::Enter => {
-                        let (item_id, item_type) = app
-                            .items_index
-                            .iter()
-                            .find(|(_, i)| i.name == app.input)
-                            .unwrap();
-                        let count = 1; // TODO buy multiple
-                        if item_type.cost * count < app.code_lines.floor() as u64 {
-                            app.code_lines -= (item_type.cost * count) as f64;
-                            app.owned_items
-                                .entry(*item_id)
-                                .and_modify(|e| *e += count)
-                                .or_insert(count);
-                        }
-                    }
-                    KeyCode::Esc => {
-                        app.input_mode = InputMode::Normal;
-                    }
-                    _ => {}
-                },
-                InputMode::Sell => todo!(),
+        let state = handle_input(&mut app)?;
+        match state {
+            GameState::BuyItem(item_string) => {
+                if let Err(e) = buy_item(&mut app, item_string) {
+                    app.error = Some(e)
+                }
             }
+            GameState::Noop => {}
+            GameState::Quit => return Ok(()),
         }
     }
 }
 
-fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
+fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
@@ -258,7 +311,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
     let owned = List::new(owned).block(Block::default().borders(Borders::ALL).title("Owned"));
     f.render_widget(owned, chunks[2]);
 
-    let messages: Vec<ListItem> = app
+    let mut messages: Vec<ListItem> = app
         .items_index
         .values()
         .map(|item| {
@@ -269,6 +322,13 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
             ListItem::new(content)
         })
         .collect();
+
+    if let Some(error) = app.error.take() {
+        messages.push(ListItem::new(Spans::from(Span::raw(format!(
+            "Error: {error}",
+        )))))
+    }
+
     let messages =
         List::new(messages).block(Block::default().borders(Borders::ALL).title("Messages"));
     f.render_widget(messages, chunks[3]);
