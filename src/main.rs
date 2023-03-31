@@ -26,7 +26,8 @@ use unicode_width::UnicodeWidthStr;
 struct Item {
     cps: f64,
     cost: u64,
-    id: u64,
+    #[serde(default)]
+    id: usize,
     name: String,
     long_name: String,
 }
@@ -43,18 +44,27 @@ struct App {
     input: String,
     /// Current input mode
     input_mode: InputMode,
+    /// Items you bought (item_id, item count)
     owned_items: HashMap<usize, u64>,
+    /// total owned code lines
     code_lines: f64,
+    /// available items: index is item id
     items_index: Vec<Item>,
+    /// some if an error occurred
     error: Option<ClidleError>,
 }
 
 impl App {
     fn new() -> App {
-        let items_index = serde_json::from_str(
+        let mut items_index: Vec<Item> = serde_json::from_str(
             &fs::read_to_string("items.json").expect("Should have been able to read the file"),
         )
         .unwrap();
+        // set ids
+        items_index
+            .iter_mut()
+            .enumerate()
+            .for_each(|(id, item)| item.id = id);
         App {
             input: String::new(),
             input_mode: InputMode::Normal,
