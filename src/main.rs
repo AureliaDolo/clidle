@@ -43,15 +43,15 @@ struct App {
     input: String,
     /// Current input mode
     input_mode: InputMode,
-    owned_items: HashMap<u64, u64>,
+    owned_items: HashMap<usize, u64>,
     code_lines: f64,
-    items_index: HashMap<u64, Item>,
+    items_index: Vec<Item>,
     error: Option<ClidleError>,
 }
 
 impl App {
     fn new() -> App {
-        let items: Vec<Item> = serde_json::from_str(
+        let items_index = serde_json::from_str(
             &fs::read_to_string("items.json").expect("Should have been able to read the file"),
         )
         .unwrap();
@@ -60,13 +60,13 @@ impl App {
             input_mode: InputMode::Normal,
             owned_items: HashMap::new(),
             code_lines: 0.,
-            items_index: items.into_iter().map(|i| (i.id, i)).collect(),
+            items_index,
             error: None,
         }
     }
     fn update(&mut self) {
         for (item_id, item_count) in self.owned_items.iter() {
-            let item_type = self.items_index.get(item_id).unwrap();
+            let item_type = self.items_index.get(*item_id).unwrap();
             self.code_lines += *item_count as f64 * item_type.cps;
         }
     }
@@ -133,6 +133,7 @@ fn buy_item(app: &mut App, item: String) -> Result<(), ClidleError> {
     let (item_id, item_type) = app
         .items_index
         .iter()
+        .enumerate()
         .find(|(_, i)| i.name == item)
         .ok_or_else(|| ClidleError::BuyingItemNotKnown(item.clone()))?;
 
@@ -140,7 +141,7 @@ fn buy_item(app: &mut App, item: String) -> Result<(), ClidleError> {
     if item_type.cost * count < app.code_lines.floor() as u64 {
         app.code_lines -= (item_type.cost * count) as f64;
         app.owned_items
-            .entry(*item_id)
+            .entry(item_id)
             .and_modify(|e| *e += count)
             .or_insert(count);
     }
@@ -300,7 +301,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         .owned_items
         .iter()
         .map(|(item_id, item_count)| {
-            let item_type = app.items_index.get(item_id).unwrap();
+            let item_type = app.items_index.get(*item_id).unwrap();
 
             let content = vec![Spans::from(Span::raw(format!(
                 "Owning {item_count} {} producing a total of {:.2} code line per second",
@@ -315,7 +316,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
 
     let mut messages: Vec<ListItem> = app
         .items_index
-        .values()
+        .iter()
         .map(|item| {
             let content = vec![Spans::from(Span::raw(format!(
                 "Buy {}(as {}) producing {:.2} code lines per second",
