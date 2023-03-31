@@ -46,7 +46,7 @@ struct App {
     owned_items: HashMap<u64, u64>,
     code_lines: f64,
     items_index: HashMap<u64, Item>,
-    error: Option<ClideError>,
+    error: Option<ClidleError>,
 }
 
 impl App {
@@ -101,13 +101,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 #[derive(Debug)]
-enum ClideError {
+enum ClidleError {
     BuyingItemNotKnown(String),
 }
 
-impl Error for ClideError {}
+impl Error for ClidleError {}
 
-impl fmt::Display for ClideError {
+impl fmt::Display for ClidleError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
     }
@@ -129,12 +129,12 @@ enum GameState {
 ///
 /// May return the infamous `ClideError::BuyingItemNotKnown` if
 /// your item is not known.
-fn buy_item(app: &mut App, item: String) -> Result<(), ClideError> {
+fn buy_item(app: &mut App, item: String) -> Result<(), ClidleError> {
     let (item_id, item_type) = app
         .items_index
         .iter()
         .find(|(_, i)| i.name == item)
-        .ok_or_else(|| ClideError::BuyingItemNotKnown(item.clone()))?;
+        .ok_or_else(|| ClidleError::BuyingItemNotKnown(item.clone()))?;
 
     let count = 1; // TODO buy multiple
     if item_type.cost * count < app.code_lines.floor() as u64 {
