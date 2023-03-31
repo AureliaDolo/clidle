@@ -6,7 +6,7 @@ use std::{
 };
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, poll, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -198,15 +198,17 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<(), B
         }
         terminal.draw(|f| ui(f, &mut app))?;
 
-        let state = handle_input(&mut app)?;
-        match state {
-            GameState::BuyItem(item_string) => {
-                if let Err(e) = buy_item(&mut app, item_string) {
-                    app.error = Some(e)
+        if poll(Duration::from_millis(100))? {
+            let state = handle_input(&mut app)?;
+            match state {
+                GameState::BuyItem(item_string) => {
+                    if let Err(e) = buy_item(&mut app, item_string) {
+                        app.error = Some(e)
+                    }
                 }
+                GameState::Noop => {}
+                GameState::Quit => return Ok(()),
             }
-            GameState::Noop => {}
-            GameState::Quit => return Ok(()),
         }
     }
 }
