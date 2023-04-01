@@ -1,20 +1,34 @@
-like cookie clicker
+<div align="center">
+  <h1><code>clidle</code></h1>
 
-To play
-`cargo run`
+  <p>
+    <strong>An idle TUI game written in Rust!</strong>
+  </p>
 
-then 
-`code`
-to produce a code line
+  <p>
+    <img src="https://img.shields.io/badge/rustc-stable+-green.svg" alt="supported rustc stable" />
+  </p>
+</div>
 
-you can buy devs that will produce code lines for you
+## What's that?
 
-`buy dev`
-or `buy dev n` with n a number
+This is an idle game (like cookie clicker) with a terminal UI, written in Rust.
 
+## How-to?
 
-TODO
-- shinny readme
+To play:
+
+- `cargo run`
+
+Then:
+
+- press 'c' to produce a code line,
+- you can buy devs (press 'd') that will produce code lines for you,
+- etc.
+
+## TODO
+
+- choose a license
 - error management !!!! 
 - save to file
 - manage auto generated code line !! in another thread ?
