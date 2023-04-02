@@ -186,7 +186,7 @@ fn buy_item(app: &mut App, item: String) -> Result<(), ClidleError> {
 
 /// Handles inputs if it's successful you get a GameState if not you may end up with
 /// an IO error.
-fn handle_input(mut app: &mut App) -> io::Result<GameState> {
+fn handle_input(app: &mut App) -> io::Result<GameState> {
     if let Event::Key(key) = event::read()? {
         match app.input_mode {
             InputMode::Normal => match key.code {
