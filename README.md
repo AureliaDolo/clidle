@@ -3,7 +3,7 @@
 Le but est de faire un idle game (ex: Cookie Clicker) en TUI, en Rust.
 
 ## Installer Rust
-La méthode conseiller est d'installer rust avec rustup, qui permet notamment de gérer les version rust d'installées.
+La méthode conseillée est d'installer rust avec rustup, qui permet notamment de gérer les version rust d'installées.
 ```
 https://www.rust-lang.org/tools/install
 ```
