@@ -2,15 +2,19 @@
     {
         "cps": 0.1,
         "cost": 5,
-        "id": 0,
         "name": "dev",
-        "long_name": "developpeureuse"
+        "long_name": "developer"
+    },
+    {
+        "cps": 2,
+        "cost": 3000,
+        "name": "f",
+        "long_name": "feature"
     },
     {
         "cps": 0.5,
         "cost": 10,
-        "id": 1,
         "name": "git",
-        "long_name": "gestionnaire de version"
+        "long_name": "version control system"
     }
 ]

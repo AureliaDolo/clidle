@@ -22,16 +22,35 @@ use tui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+/// Un item pour produire du code
+///
+/// # note
+/// les trois / indiquent un commentaire de documentation
+/// Ils permettent d'indiquer que ce commentaire documente
+/// ce qui suit (fonction, struct, mod, etc)
+///
+/// Ils permettent notamment de générer la documentation
+/// complète du projet (et de ces dépendances) au format html avec `cargo doc`
+///
+/// les commentaire classique se font avec deux /
+/// ou bien entre /* votre commentaire */
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Item {
+    /// code par seconde
     cps: f64,
+    /// cout unitaire
     cost: u64,
+    /// identifiant unique
     #[serde(default)]
     id: usize,
+    /// nom pour interagir avec l'item
     name: String,
+    /// nom complet à afficher de l'item
     long_name: String,
 }
 
+/// Les input auront des effets différents selon
+/// dans quel mode on se situe
 enum InputMode {
     Buy,
     Sell,
@@ -74,6 +93,7 @@ impl App {
             error: None,
         }
     }
+
     fn update(&mut self) {
         for (item_id, item_count) in self.owned_items.iter() {
             let item_type = self.items_index.get(*item_id).unwrap();
@@ -84,6 +104,8 @@ impl App {
 
 fn main() -> Result<(), Box<dyn Error>> {
     // setup terminal
+    // le ? permet de faire un early return en cas d'erreur.
+    // https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html#a-shortcut-for-propagating-errors-the--operator
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -104,7 +126,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("{:?}", err)
+        println!("{err:?}")
     }
 
     Ok(())
@@ -115,11 +137,15 @@ enum ClidleError {
     BuyingItemNotKnown(String),
 }
 
+// les deux blocs impl suivant sont des implémentaition concrètes de trait de la lib standard.
+// par exemple, avoir implémenter le trait display, permet de directement
+// println!("{}", clidle_error); où clidle_error est de type ClidleError
+
 impl Error for ClidleError {}
 
 impl fmt::Display for ClidleError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -137,7 +163,7 @@ enum GameState {
 ///
 /// ## Errors
 ///
-/// May return the infamous `ClideError::BuyingItemNotKnown` if
+/// May return the infamous `ClidleError::BuyingItemNotKnown` if
 /// your item is not known.
 fn buy_item(app: &mut App, item: String) -> Result<(), ClidleError> {
     let (item_id, item_type) = app
@@ -199,20 +225,35 @@ fn handle_input(mut app: &mut App) -> io::Result<GameState> {
     Ok(GameState::Noop)
 }
 
+/// contient la boucle de jeu
+///
+/// Ici Terminal est un type générique qui a besoin d'une interface (un trait)
+/// pour fonctionner. Ici en particulier le trait backend permet d'interagir avec le terminal
+/// (dessin, gestion du curseur, etc)
+///
+///
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<(), Box<dyn Error>> {
+    // pour vérifier si il faut mettre à jour l'état du jeu
     let mut last_tick = Instant::now();
 
     loop {
+        // mise à jour de l'état du jeu
         if last_tick.elapsed() >= Duration::from_secs(1) {
             app.update();
             last_tick = Instant::now();
         }
+
+        // ici l'argument de la fonction est une closure, une autre fonction anonyme
         terminal.draw(|f| ui(f, &mut app))?;
 
+        // la fonction poll permet de vérifier si un evenement s'est rendu disponible
+        // avant la fin du temps inparti
         if poll(Duration::from_millis(100))? {
             let state = handle_input(&mut app)?;
             match state {
                 GameState::BuyItem(item_string) => {
+                    // On veut pouvoir afficher l'erreur et sans paniquer
+                    // en effet, on ne sait si ce que le joueur a entré est valide ou non
                     if let Err(e) = buy_item(&mut app, item_string) {
                         app.error = Some(e)
                     }
@@ -224,6 +265,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<(), B
     }
 }
 
+// Permet de gérer tout l'affichage
 fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -262,7 +304,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
                 Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" to stop buying, "),
                 Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" to record the message"),
+                Span::raw(" buy"),
             ],
             Style::default(),
         ),
@@ -273,7 +315,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
                 Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" to stop selling, "),
                 Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" to record the message"),
+                Span::raw(" to sell"),
             ],
             Style::default(),
         ),
@@ -328,6 +370,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         .items_index
         .iter()
         .map(|item| {
+            // TODO: on peut afficher le prix de chaque item
             let content = vec![Spans::from(Span::raw(format!(
                 "Buy {}(as {}) producing {:.2} code lines per second",
                 item.long_name, item.name, item.cps
@@ -336,6 +379,9 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         })
         .collect();
 
+    // TODO ici le take prend l'erreur est laisse un None a sa place
+    // le message d'erreur reste donc affiché seulement le temps d'une frame
+    // comment faire pour l'afficher plus longtemps, le temps de la lire
     if let Some(error) = app.error.take() {
         messages.push(ListItem::new(Spans::from(Span::raw(format!(
             "Error: {error}",
