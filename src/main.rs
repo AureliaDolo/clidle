@@ -70,7 +70,7 @@ struct App {
     /// available items: index is item id
     items_index: Vec<Item>,
     /// some if an error occurred
-    error: Option<ClidleError>,
+    error: Result<(), ClidleError>,
 }
 
 impl App {
@@ -90,7 +90,7 @@ impl App {
             owned_items: HashMap::new(),
             code_lines: 0.,
             items_index,
-            error: None,
+            error: Ok(()),
         }
     }
 
@@ -254,9 +254,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<(), B
                 GameState::BuyItem(item_string) => {
                     // On veut pouvoir afficher l'erreur et sans paniquer
                     // en effet, on ne sait si ce que le joueur a entré est valide ou non
-                    if let Err(e) = buy_item(&mut app, item_string) {
-                        app.error = Some(e)
-                    }
+                    app.error = buy_item(&mut app, item_string)
                 }
                 GameState::Noop => {}
                 GameState::Quit => return Ok(()),
@@ -379,10 +377,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         })
         .collect();
 
-    // TODO ici le take prend l'erreur est laisse un None a sa place
-    // le message d'erreur reste donc affiché seulement le temps d'une frame
-    // comment faire pour l'afficher plus longtemps, le temps de la lire
-    if let Some(error) = app.error.take() {
+    if let Err(error) = app.error.as_ref() {
         messages.push(ListItem::new(Spans::from(Span::raw(format!(
             "Error: {error}",
         )))))
